@@ -1,0 +1,13 @@
+* The data of the examples
+
+~penguins.csv~ is ~penguins~ of the R package [[https://allisonhorst.github.io/palmerpenguins/][palmerpenguins]], by Allison
+Horst, Alison Hill and Kristen Gorman, as the package writes it: 344 rows,
+~NA~ for a missing value. The package gives the data under CC0.
+
+The data were collected and made available by Dr. Kristen Gorman and the
+Palmer Station, Antarctica LTER, a member of the Long Term Ecological
+Research Network. They were first published in:
+
+Gorman KB, Williams TD, Fraser WR (2014). Ecological sexual dimorphism and
+environmental variability within a community of Antarctic penguins (genus
+/Pygoscelis/). PLoS ONE 9(3): e90081. https://doi.org/10.1371/journal.pone.0090081

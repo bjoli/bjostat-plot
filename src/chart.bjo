@@ -119,13 +119,20 @@
     ((Some (Other kind)) (refuse (str "'" name "' is a column of " kind ", which a chart cannot show.")))))
 
 ;; The encoding of a channel: the field, its type, and a category's order.
-(: (-> Field Json))
-(defun (encoding f)
-  (object (vec-append-pairs [(Tuple "field" (JsonStr (record-ref f name)))
-                             (Tuple "type" (JsonStr (record-ref f kind)))]
-                            (if (= (vec-length (record-ref f order)) 0)
-                                []
-                                [(Tuple "sort" (array (vec-map (fun (l) (JsonStr l)) (record-ref f order))))]))))
+;; With `fit?`, the scale of a number fits its values and does not start
+;; at 0, as R draws points and lines; the bars of a bar chart start at 0.
+(: (-> Field bool Json))
+(defun (encoding f fit?)
+  (def sort (if (= (vec-length (record-ref f order)) 0)
+                []
+                [(Tuple "sort" (array (vec-map (fun (l) (JsonStr l)) (record-ref f order))))]))
+  (def scale (if (and fit? (= (record-ref f kind) "quantitative"))
+                 [(Tuple "scale" (object [(Tuple "zero" (JsonBool #f))]))]
+                 []))
+  (object (vec-append-pairs (vec-append-pairs [(Tuple "field" (JsonStr (record-ref f name)))
+                                               (Tuple "type" (JsonStr (record-ref f kind)))]
+                                              sort)
+                            scale)))
 
 (: (-> (Vec %a) (Vec %a) (Vec %a)))
 (defun (vec-append-pairs a b) (loop (:for x b) (:acc v (folding a (vec-add v x)))))
@@ -175,7 +182,7 @@
         (Ok (Chart (body [(Tuple "data" (data-of distinct rows))
                           (Tuple "mark" (JsonStr mark))
                           (Tuple "encoding" (object {vecing (Tuple (match (vec-ref used i) ((Tuple channel _ _) channel))
-                                                                   (encoding (vec-ref fields i)))
+                                                                   (encoding (vec-ref fields i) (not (= mark "bar"))))
                                                             (:for i (range 0 (vec-length used)))}))])
                    (title title) (width 400) (height 300))))))))
 

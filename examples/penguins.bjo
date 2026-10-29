@@ -1,0 +1,196 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+;; bjostat-plot/examples/penguins.bjo — the Palmer penguins: 344 penguins of
+;; three species on three islands of the Palmer Archipelago, Antarctica,
+;; measured from 2007 to 2009 by Dr. Kristen Gorman. The steps are those of
+;; two R tutorials of the data: "Basic data analysis with palmerpenguins"
+;; (R-bloggers, 2020) and "Release the penguins" (RStudio Education).
+;;
+;;     bjo run examples/penguins.bjo [csv] [directory]
+;;
+;; Reads examples/data/penguins.csv by default, prints the tests and models,
+;; and writes the charts penguins-species, penguins-mass, penguins-bills and
+;; penguins-histogram into the directory, the current one by default: as .svg
+;; where vl-convert is installed, and as .vl.json where it is not.
+
+(import (std prelude))
+(import (only (std maths) round))
+(import (bjostat table))
+(import (bjostat csv))
+(import (bjostat query))
+(import (bjostat stats))
+(import (bjostat models))
+(import (bjostat hypothesis))
+(import (bjostat columns))
+(import (bjostat plot chart))
+(import (bjostat plot save))
+
+(: (-> (Result TableError %a) %a))
+(defun (ok r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
+
+(: (-> (Result ModelError %a) %a))
+(defun (ok-model r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
+
+(: (-> double string))
+(defun (three-decimals x) (double->string (/ (round (* x 1000.0)) 1000.0)))
+
+;; A p-value as R prints it: one below 2.2e-16, the precision of a double
+;; near 1, as "< 2.2e-16".
+(: (-> double string))
+(defun (p-text p) (if (< p 2.2e-16) "< 2.2e-16" (str "= " (double->string p))))
+
+(: (-> (Vec double) (Column double)))
+(defun (doubles-column v) (array->column (vec->array v)))
+
+(: (-> string (Result TableError Table)))
+(defun (penguins path)
+  ;; R writes a missing value as NA. The three columns of text are
+  ;; categories, as R's factors.
+  (read-csv path #:nulls ["NA"]
+                 #:types [(Tuple "species" Category) (Tuple "island" Category) (Tuple "sex" Category)]))
+
+(: (-> Table string (Result TableError Unit)))
+(defun (analyse t dir)
+  (println (str (int->string (table-row-count t)) " penguins:"))
+  (println (table->string t #:rows 3))
+  (println "")
+  (println (table->string (ok (table-select (table-summary t) ["column" "type" "count" "nulls" "min" "mean" "max"]))
+                          #:digits 1))
+  (println "")
+  (columns t (species string) (sex string)
+           (bill "bill_length_mm" double) (depth "bill_depth_mm" double)
+           (flipper "flipper_length_mm" long) (mass "body_mass_g" long))
+
+  ;; How many of each species on each island? Adelie penguins live on all
+  ;; three; Chinstrap only on Dream, Gentoo only on Biscoe.
+  (def (Ok counts) (table-crosstab t "species" "island") :propagate)
+  (println (table->string counts))
+  (match (chi-squared-test counts)
+    ((Ok r) (println (chi-squared-test->string r)))
+    ((Err e) (println (displayed e))))
+  (println "")
+
+  ;; Heavy penguins have long flippers: R's cor.test(flipper_length_mm, body_mass_g).
+  (match (loop (:for f* flipper) (:for m* mass)
+               (:when-let (Some f) f*) (:when-let (Some m) m*)
+               (:acc (correlation-test (Tuple (cast double f) (cast double m)))))
+    ((Ok r) (println (str "The correlation of flipper length and body mass is "
+                          (three-decimals (record-ref r estimate)) ", p "
+                          (p-text (record-ref r p-value)) ".")))
+    ((Err e) (println (displayed e))))
+  (println "")
+
+  ;; Are males heavier? R's t.test(body_mass_g ~ sex).
+  (match (loop (:for s* sex) (:for m* mass)
+               (:when-let (Some s) s*) (:when-let (Some m) m*)
+               (:acc (welch-t-test 0.0 (Tuple (= s "female") (cast double m)))))
+    ((Ok r) (println (t-test->string r)))
+    ((Err e) (println (displayed e))))
+  (println "")
+
+  ;; Body mass by flipper length and species: R's
+  ;; lm(body_mass_g ~ flipper_length_mm + species) and its anova.
+  (def (Ok levels) (category-levels t "species") :propagate)
+  (def (Ok codes) (category-codes t "species") :propagate)
+  (def categories [(Tuple "species" levels)])
+  (match (loop (:for c* codes) (:for f* flipper) (:for m* mass)
+               (:when-let (Some c) c*) (:when-let (Some f) f*) (:when-let (Some m) m*)
+               (:acc (with-categories linear-model ["flipper_length_mm"] categories
+                                      (Tuple (cast double m) [(cast double f)] [c]))))
+    ((Ok m)
+     (println (model->string m))
+     (println "")
+     (println (table->string (ok-model (model-anova m (anova-terms ["flipper_length_mm"] categories))) #:digits 2)))
+    ((Err e) (println (displayed e))))
+  (println "")
+
+  ;; Simpson's paradox: of all the penguins, a longer bill is a shallower
+  ;; one; of each species, it is a deeper one. One model of all the rows,
+  ;; and one of each species, by `grouping`; `summarizing` gives each
+  ;; species' shortest and longest bill, the ends of its line.
+  (def all (ok-model (loop (:for b* bill) (:for d* depth)
+                     (:when-let (Some b) b*) (:when-let (Some d) d*)
+                     (:acc (simple-linear-model "bill_length_mm" (Tuple d b))))))
+  (def by-species
+    (loop (:for s* species) (:for b* bill) (:for d* depth)
+          (:when-let (Some s) s*) (:when-let (Some b) b*) (:when-let (Some d) d*)
+          (:acc (grouping (pairing (simple-linear-model "bill_length_mm") summarizing)
+                          (Tuple s (Tuple (Tuple d b) b))))))
+  (: (-> string LinearModel string))
+  (defun (slope name m)
+    (def b (vec-ref (record-ref m estimates) 1))
+    (str name ": depth = " (three-decimals (vec-ref (record-ref m estimates) 0))
+         (if (< b 0.0) " - " " + ") (three-decimals (abs b)) " × length"))
+  (println (slope "All" all))
+  ;; The ends of each line: a row for each end, with the species of its line.
+  (def ends
+    (loop (:for l levels)
+          (:let (Tuple model range) (ok-pair (map-ref by-species l)))
+          (:do (println (slope l model)))
+          (:acc xs (folding [] (vec-add (vec-add xs (record-ref range min)) (record-ref range max))))
+          (:acc ys (folding [] (vec-add (vec-add ys (model-predict model [(record-ref range min)]))
+                                        (model-predict model [(record-ref range max)]))))
+          (:acc names (folding [] (vec-add (vec-add names l) l)))
+          => (Tuple xs ys names)))
+  (def (Tuple xs ys names) ends)
+  ;; The line of all the penguins, as a fourth "species", so that the chart
+  ;; gives it a colour of its own. It is the last level, so that the species
+  ;; keep the colours of the other charts.
+  (def lines (ok (table-categorize
+                  (ok (make-table [(named "bill_length_mm" (doubles-column (vec-add (vec-add xs 32.1) 59.6)))
+                              (named "bill_depth_mm" (doubles-column (vec-add (vec-add ys (model-predict all [32.1]))
+                                                                              (model-predict all [59.6]))))
+                              (named-strings "species" (array->string-column (vec->array (vec-add (vec-add names "All") "All"))))]))
+                  "species" #:levels (vec-add levels "All"))))
+  (println "")
+
+  ;; The charts.
+  (def (Ok species-counts) (table-count t ["species"]) :propagate)
+  (loop (:for (Tuple name c) (ok-plot (charts t species-counts lines)))
+        (:do (save dir name c)))
+  (Ok unit))
+
+(: (-> Table Table Table (Result PlotError (Vec (Tuple string Chart)))))
+(defun (charts t species-counts lines)
+  (def (Ok bars) (bar-plot species-counts "species" "n" #:title "Penguins by species") :propagate)
+  (def (Ok mass-chart) (scatter-plot t "flipper_length_mm" "body_mass_g" #:color "species"
+                                     #:title "Flipper length and body mass") :propagate)
+  (def (Ok points) (scatter-plot t "bill_length_mm" "bill_depth_mm" #:color "species") :propagate)
+  (def (Ok fits) (line-plot lines "bill_length_mm" "bill_depth_mm" #:color "species") :propagate)
+  (def (Ok masses) (histogram t "body_mass_g" #:bins 20 #:title "Body mass") :propagate)
+  (Ok [(Tuple "penguins-species" bars)
+       (Tuple "penguins-mass" mass-chart)
+       (Tuple "penguins-bills" (chart-title (layer [points fits]) "Bill length and depth, with linear models"))
+       (Tuple "penguins-histogram" masses)]))
+
+;; Saves the chart as SVG, or as Vega-Lite's JSON where vl-convert is not
+;; installed.
+(: (-> string string Chart void))
+(defun (save dir name c)
+  (match (save-chart c (str dir "/" name ".svg"))
+    ((Ok _) (println (str "wrote " dir "/" name ".svg")))
+    ((Err _)
+     (match (save-chart c (str dir "/" name ".vl.json"))
+       ((Ok _) (println (str "wrote " dir "/" name ".vl.json")))
+       ((Err e) (println (displayed e)))))))
+
+;; A species' model and the summary of its bill lengths. Each species has
+;; rows enough for both, so anything else is a bug.
+(: (-> (Tuple (Result ModelError LinearModel) (Option Summary)) (Tuple LinearModel Summary)))
+(defun (ok-pair p)
+  (match p
+    ((Tuple (Ok m) (Some s)) (Tuple m s))
+    ((Tuple (Err e) _) (panic! (displayed e)))
+    (_ (panic! "a species with no bill lengths"))))
+
+(: (-> (Result PlotError %a) %a))
+(defun (ok-plot r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
+
+(defun (main args)
+  (def path (if (> (vec-length args) 0) (vec-ref args 0) "examples/data/penguins.csv"))
+  (def dir (if (> (vec-length args) 1) (vec-ref args 1) "."))
+  (match (penguins path)
+    ((Ok t) (match (analyse t dir) ((Ok _) 0) ((Err e) (println (displayed e)) 1)))
+    ((Err e) (println (displayed e)) 1)))

@@ -46,8 +46,11 @@
                "\"title\":\"Stops\","
                "\"data\":{\"values\":[{\"speed\":4,\"dist\":2.0},{\"speed\":7,\"dist\":4.5},{\"speed\":10,\"dist\":null}]},"
                "\"mark\":\"point\","
-               "\"encoding\":{\"x\":{\"field\":\"speed\",\"type\":\"quantitative\"},"
-               "\"y\":{\"field\":\"dist\",\"type\":\"quantitative\"}}}"))
+               "\"encoding\":{\"x\":{\"field\":\"speed\",\"type\":\"quantitative\",\"scale\":{\"zero\":false}},"
+               "\"y\":{\"field\":\"dist\",\"type\":\"quantitative\",\"scale\":{\"zero\":false}}}}"))
+  (expect "the bars of a bar chart start at 0, and the points do not"
+          (string-contains? (chart->json (ok (bar-plot cars "speed" "dist"))) "zero")
+          #f)
   (expect "a colour of strings is nominal"
           (string-contains? (chart->json (ok (scatter-plot cars "speed" "dist" #:color "make")))
                             "\"color\":{\"field\":\"make\",\"type\":\"nominal\"}")

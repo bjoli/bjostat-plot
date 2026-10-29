@@ -37,6 +37,10 @@ time temporal. A column a chart cannot use, as strings on the x of a
 scatter plot, is an ~Err~ when the chart is made, as is a column the table
 does not have.
 
+*Scales.* The scale of a number on a scatter or line chart fits its values
+and does not start at 0, as R draws them; the bars of a bar chart and a
+histogram start at 0.
+
 *Size.* The rows of the columns a chart uses go into its specification, and
 Vega-Lite draws each. A chart of more rows than ~#:max-rows~, 5000 by
 default, is an ~Err~ rather than a file of a million points: aggregate the
@@ -69,6 +73,71 @@ bjo run examples/cars.bjo /tmp
 
 The images in ~docs/~ are of the specifications it writes, drawn by
 vl-convert 1.9.0 at twice their size.
+
+** An example: the Palmer penguins
+
+~examples/penguins.bjo~ ports the steps of two R tutorials of the Palmer
+penguins, [[https://www.r-bloggers.com/2020/07/basic-data-analysis-with-palmerpenguins/][Basic data analysis with palmerpenguins]] (R-bloggers, 2020) and
+[[https://education.rstudio.com/blog/2020/07/palmerpenguins-cran/][Release the penguins]] (RStudio Education, 2020). The data are 344 penguins
+of three species on three islands of the Palmer Archipelago, Antarctica,
+measured by Dr. Kristen Gorman from 2007 to 2009 ([[file:examples/data/README.org][examples/data]]).
+
+#+BEGIN_SRC sh
+bjo run examples/penguins.bjo examples/data/penguins.csv /tmp
+#+END_SRC
+
+R writes a missing value as ~NA~, so the file is read with ~#:nulls~, and
+the columns of text are categories, as R's factors:
+
+#+BEGIN_SRC scheme
+(read-csv path #:nulls ["NA"]
+               #:types [(Tuple "species" Category) (Tuple "island" Category) (Tuple "sex" Category)])
+#+END_SRC
+
+| Step | R | bjostat |
+|------+---+---------|
+| A summary of each column | ~summary(penguins)~ | ~table-summary~ |
+| The species on each island | ~table(species, island)~, ~chisq.test~ | ~table-crosstab~, ~chi-squared-test~ |
+| Flipper length and body mass | ~cor.test~ | ~correlation-test~ |
+| Are males heavier? | ~t.test(body_mass_g ~ sex)~ | ~welch-t-test~ |
+| Body mass by flipper and species | ~lm~, ~anova~ | ~with-categories linear-model~, ~model-anova~ |
+| Bill length and depth | ~lm~ of all, and of each species | ~simple-linear-model~, by ~grouping~ |
+
+Each test and model leaves out the rows with a null in its columns, as R's
+~na.omit~ does. The model of body mass:
+
+#+BEGIN_SRC text
+Coefficients:
+                  Estimate Std. Error t value Pr(>|t|)
+(Intercept)          -4031      584.2  -6.901 2.55e-11
+flipper_length_mm    40.71      3.071   13.25   <2e-16
+speciesChinstrap    -206.5      57.73  -3.577 0.000398
+speciesGentoo        266.8      95.26   2.801  0.00539
+#+END_SRC
+
+A Gentoo penguin is 267 g heavier than an Adelie with flippers of the same
+length, and a Chinstrap 207 g lighter.
+
+[[file:docs/penguins-bills.png]]
+
+Bills show Simpson's paradox. Of all the penguins, a bill 1 mm longer is
+on average 0.085 mm shallower. Of each species, it is about 0.2 mm deeper:
+
+#+BEGIN_SRC text
+All: depth = 20.885 - 0.085 × length
+Adelie: depth = 11.409 + 0.179 × length
+Chinstrap: depth = 7.569 + 0.222 × length
+Gentoo: depth = 5.251 + 0.205 × length
+#+END_SRC
+
+Gentoo penguins have long and shallow bills, and Adelie penguins short and
+deep ones, so the line of all the penguins falls where each species' line
+rises.
+
+| [[file:docs/penguins-mass.png]] | [[file:docs/penguins-histogram.png]] |
+
+The tutorials also draw boxplots, a matrix of all the scatter plots, and
+charts by facets; ~(bjostat plot)~ does not draw these yet.
 
 ** Tests
 
