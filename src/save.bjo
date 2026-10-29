@@ -1,0 +1,66 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+;; bjostat-plot/src/save.bjo — the module (bjostat plot save): a chart
+;; written to a file, as its Vega-Lite specification or as an image.
+;;
+;;     (save-chart c "cars.vl.json")   ; the specification
+;;     (save-chart c "cars.svg")       ; an image: .svg, .png or .pdf
+;;
+;; An image is drawn by vl-convert (github.com/vega/vl-convert), a program
+;; that has Vega in it and needs no browser and no Node. Install it with
+;; `cargo install vl-convert --locked`, or take a release's binary, and have it
+;; on the PATH. Without it an image is an Err that says so; the
+;; specification needs nothing.
+
+(export save-chart)
+
+(import (std prelude))
+(import (std run))
+(import (bjostat plot chart))
+
+(: (-> string (Result PlotError %a)))
+(defun (refuse message) (Err (PlotError (message message))))
+
+;; vl-convert's command for an extension, or "".
+(: (-> string string))
+(defun (converter extension)
+  (match extension
+    (".svg" "vl2svg")
+    (".png" "vl2png")
+    (".pdf" "vl2pdf")
+    (_ "")))
+
+;; Writes the chart to `path`: its specification for a path ending in .json,
+;; and an image of it for one ending in .svg, .png or .pdf.
+(: (-> Chart string (Result PlotError Unit)))
+(defun (save-chart c path)
+  (def extension (string-downcase (option-value (path-file-extension path) "")))
+  (cond
+    ((= extension ".json") (write-text path (chart->json c)))
+    ((= (converter extension) "")
+     (refuse (str path ": a chart is saved as .json, .svg, .png or .pdf, and this ends in '" extension "'.")))
+    (else (draw c path (converter extension)))))
+
+(: (-> string string (Result PlotError Unit)))
+(defun (write-text path text)
+  (match (try (file-write-text path text) #:catch (System.Exception))
+    ((Ok _) (Ok unit))
+    ((Err e) (refuse (str path ": " (.-Message e))))))
+
+;; The specification to a file beside the image, then vl-convert from that
+;; to the image; the specification is deleted after.
+(: (-> Chart string string (Result PlotError Unit)))
+(defun (draw c path command)
+  (def spec (str path ".vl.json"))
+  (def (Ok _) (write-text spec (chart->json c)) :propagate)
+  (def result (run/status '(,(cmd "vl-convert" command "--input" spec "--output" path))))
+  (ignore (try (file-delete spec) #:catch (System.Exception)))
+  (match result
+    ((Ok 0) (Ok unit))
+    ((Ok code) (refuse (str "vl-convert " command " stopped with the code " (int->string code) " for " path ".")))
+    ((Err e)
+     (refuse (str "vl-convert, which draws a chart as an image, did not run: " (.-Message e)
+                  ". Install it with `cargo install vl-convert --locked` and have it on the PATH,"
+                  " or save the chart as .json.")))))

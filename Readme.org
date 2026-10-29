@@ -1,0 +1,74 @@
+* bjostat-plot — charts of bjostat's tables
+
+The package ~(bjostat plot)~ makes charts of the tables of [[https://github.com/bjoli/bjostat][bjostat]] as
+[[https://vega.github.io/vega-lite/][Vega-Lite]] specifications, and saves them as JSON, or as SVG, PNG or PDF.
+
+#+BEGIN_SRC scheme
+(import (bjostat plot chart))
+(import (bjostat plot save))
+
+(def (Ok c) (scatter-plot cars "speed" "dist" #:title "Stopping distance") :propagate)
+(save-chart c "cars.svg")
+#+END_SRC
+
+** Charts: (bjostat plot chart)
+
+| Function | What it draws |
+|----------+---------------|
+| ~(scatter-plot t x y #:color c)~ | A point for each row; x and y are numbers or times |
+| ~(line-plot t x y #:color c)~ | A line through the rows in the order of x; a line for each value of ~c~ |
+| ~(bar-plot t x y #:color c)~ | A bar for each row, as ~table-count~ or ~groups->table~ makes them |
+| ~(histogram t x #:bins 30)~ | The counts of a column of numbers in bins of one width |
+| ~(layer [c1 c2 ...])~ | The charts drawn on one another: points and the line of a model |
+| ~(chart-title c s)~, ~(chart-size c w h)~ | A title, and the size in pixels |
+| ~(chart->json c #:indent 0)~ | The Vega-Lite specification, as text |
+
+Each also takes ~#:title~, and the charts of rows ~#:max-rows~.
+
+*Types.* A chart takes the names of columns, and the Vega-Lite type of each
+comes from its type in the table: a number is quantitative, a string or a
+bool nominal, a category nominal in the order of its levels, and a date or a
+time temporal. A column a chart cannot use, as strings on the x of a
+scatter plot, is an ~Err~ when the chart is made, as is a column the table
+does not have.
+
+*Size.* The rows of the columns a chart uses go into its specification, and
+Vega-Lite draws each. A chart of more rows than ~#:max-rows~, 5000 by
+default, is an ~Err~ rather than a file of a million points: aggregate the
+table first, or give ~#:max-rows~. A histogram counts its bins here, so it
+holds the bins, whatever the number of rows.
+
+** Saving: (bjostat plot save)
+
+~(save-chart c path)~ writes the specification to a path ending in ~.json~,
+and an image to one ending in ~.svg~, ~.png~ or ~.pdf~. The image is drawn by
+[[https://github.com/vega/vl-convert][vl-convert]], a program with Vega in it that needs no browser and no Node:
+install it with ~cargo install vl-convert --locked~, or take a release's
+binary, and have it on the ~PATH~. Without it, an image is an ~Err~ that
+says so, and the specification still is written.
+
+~save-chart~ waits for vl-convert, so a bjoroutine that calls it parks its
+thread, as the compiler warns.
+
+** An example
+
+~examples/cars.bjo~ draws R's ~cars~: the points with the line of a linear
+model of ~(bjostat models)~ through them, a histogram of the distances, and
+the counts of bands of speed, a category in its order.
+
+#+BEGIN_SRC sh
+bjo run examples/cars.bjo /tmp
+#+END_SRC
+
+** Tests
+
+#+BEGIN_SRC sh
+bjo run tests/chart.bjo    # every line starts with "ok:"
+#+END_SRC
+
+The specifications of the example were drawn by vl-convert 1.9.0, as SVG
+and as PNG, and look as they should.
+
+** License
+
+MPL-2.0, as bjostat.

@@ -1,0 +1,287 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+;; bjostat-plot/src/chart.bjo — the module (bjostat plot chart): charts of
+;; tables as Vega-Lite specifications.
+;;
+;;     (def (Ok c) (scatter-plot cars "speed" "dist" #:title "Stopping distance") :propagate)
+;;     (save-chart c "cars.svg")
+;;
+;; A chart is made of a table and the names of its columns. The Vega-Lite
+;; type of each column comes from its type: a number is quantitative, a
+;; string or a bool nominal, a category nominal in the order of its levels,
+;; and a date or a time temporal. A column that a chart cannot use, as a
+;; string on the x of a scatter plot, is an Err when the chart is made.
+;;
+;; The rows of the columns a chart uses go into the specification. A chart
+;; of more rows than `#:max-rows`, 5000 by default, is an Err: Vega-Lite
+;; draws each row, and a chart of a million is a file of a million rows that
+;; a browser draws slowly. Aggregate the table first (a histogram does, as
+;; it counts its bins here), or give `#:max-rows`.
+;;
+;; The specification is Vega-Lite 5, as its $schema says; chart->json gives
+;; it as text, and (bjostat plot save) writes it, or an image of it.
+
+(export
+  Chart PlotError
+  scatter-plot line-plot bar-plot histogram
+  layer chart-title chart-size
+  chart->json)
+
+(import (std prelude))
+(import (only (std maths) floor finite?))
+(import (text json))
+(import (only (std datetime) Date DateTime Instant))
+(import (bjostat table))
+
+;; Why a chart cannot be made.
+(type (: PlotError (Record (: message string))))
+
+(impl (Displayed PlotError)
+  (defun (displayed e) (record-ref e message))
+  (defun (display-into e b) (stringbuilder-add-string! b (record-ref e message))))
+
+(: (-> string (Result PlotError %a)))
+(defun (refuse message) (Err (PlotError (message message))))
+
+;; A chart: the fields of its Vega-Lite specification but those of the top,
+;; which chart->json adds: its schema, title and size.
+(type (: Chart #:opaque (Struct (: body (Vec (Tuple string Json)))
+                                (: title string)
+                                (: width int)
+                                (: height int))))
+
+(: (-> (Vec (Tuple string Json)) Json))
+(defun (object fields) (JsonFields (vec->iarray fields)))
+
+(: (-> (Vec Json) Json))
+(defun (array items) (JsonArr (vec->iarray items)))
+
+;; ===========================================================================
+;; Columns as data
+;; ===========================================================================
+
+;; What a column is to Vega-Lite: its type, its values, and the order of a
+;; category's levels.
+(type (: Field (Record (: name string) (: kind string) (: values (Vec Json)) (: order (Vec string)))))
+
+(: (-> double Json))
+(defun (number x) (if (finite? x) (JsonFloat x) JsonNull))
+
+(: (-> (Option %a) (-> %a Json) Json))
+(defun (or-null o f) (match o ((Some x) (f x)) (None JsonNull)))
+
+(: (-> (Result TableError %a) (Result PlotError %a)))
+(defun (plot-error r)
+  (match r ((Ok x) (Ok x)) ((Err e) (refuse (displayed e)))))
+
+;; The values of the column, as Vega-Lite reads them: null at a null.
+(: (-> Table string (Result PlotError Field)))
+(defun (field-of t name)
+  (: (-> string (Vec Json) Field))
+  (defun (field kind values) (Field (name name) (kind kind) (values values) (order [])))
+  (match (column-type t name)
+    (None (refuse (str "the table has no column '" name "'. Its columns are: "
+                       (string-join (table-names t) ", ") ".")))
+    ((Some Double)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells double)))) :propagate)
+     (Ok (field "quantitative" {vecing (or-null x number) (:for x c)})))
+    ((Some Float)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells float)))) :propagate)
+     (Ok (field "quantitative" {vecing (or-null x (fun (v) (number (cast double v)))) (:for x c)})))
+    ((Some Long)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells long)))) :propagate)
+     (Ok (field "quantitative" {vecing (or-null x (fun (v) (JsonInt v))) (:for x c)})))
+    ((Some Int)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells int)))) :propagate)
+     (Ok (field "quantitative" {vecing (or-null x (fun (v) (JsonInt (cast long v)))) (:for x c)})))
+    ((Some String)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells string)))) :propagate)
+     (Ok (field "nominal" {vecing (or-null x (fun (v) (JsonStr v))) (:for x c)})))
+    ((Some Category)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells string)))) :propagate)
+     (def (Ok levels) (plot-error (category-levels t name)) :propagate)
+     (Ok (Field (name name) (kind "nominal") (values {vecing (or-null x (fun (v) (JsonStr v))) (:for x c)})
+                (order levels))))
+    ((Some Bool)
+     (def (Ok c) (plot-error (: (column-as t name) (Result TableError (Cells bool)))) :propagate)
+     (Ok (field "nominal" {vecing (or-null x (fun (v) (JsonBool v))) (:for x c)})))
+    ((Some Dates)
+     (def (Ok c) (plot-error (date-cells t name)) :propagate)
+     (Ok (field "temporal" {vecing (or-null x (fun (v) (JsonStr (written v)))) (:for x c)})))
+    ((Some DateTimes)
+     (def (Ok c) (plot-error (datetime-cells t name)) :propagate)
+     (Ok (field "temporal" {vecing (or-null x (fun (v) (JsonStr (written v)))) (:for x c)})))
+    ((Some Instants)
+     (def (Ok c) (plot-error (instant-cells t name)) :propagate)
+     (Ok (field "temporal" {vecing (or-null x (fun (v) (JsonStr (written v)))) (:for x c)})))
+    ((Some (Other kind)) (refuse (str "'" name "' is a column of " kind ", which a chart cannot show.")))))
+
+;; The encoding of a channel: the field, its type, and a category's order.
+(: (-> Field Json))
+(defun (encoding f)
+  (object (vec-append-pairs [(Tuple "field" (JsonStr (record-ref f name)))
+                             (Tuple "type" (JsonStr (record-ref f kind)))]
+                            (if (= (vec-length (record-ref f order)) 0)
+                                []
+                                [(Tuple "sort" (array (vec-map (fun (l) (JsonStr l)) (record-ref f order))))]))))
+
+(: (-> (Vec %a) (Vec %a) (Vec %a)))
+(defun (vec-append-pairs a b) (loop (:for x b) (:acc v (folding a (vec-add v x)))))
+
+;; The data of the fields, a row for each row of the table.
+(: (-> (Vec Field) int Json))
+(defun (data-of fields rows)
+  (object [(Tuple "values"
+                  (array {vecing (object {vecing (Tuple (record-ref f name) (vec-ref (record-ref f values) r))
+                                                 (:for f fields)})
+                                 (:for r (range 0 rows))}))]))
+
+;; ===========================================================================
+;; Charts
+;; ===========================================================================
+
+;; The channels a chart encodes, each a channel's name, a column, and the
+;; Vega-Lite types it may be of. A column of "" is no channel.
+(: (-> Table string (Vec (Tuple string string (Vec string))) int string (Result PlotError Chart)))
+(defun (chart-of t mark channels max-rows title)
+  (def rows (table-row-count t))
+  (def used (vec-filter (fun (c) (match c ((Tuple _ column _) (not (= column ""))))) channels))
+  (if (> rows max-rows)
+      (refuse (str "the chart would draw " (int->string rows) " rows, and #:max-rows is " (int->string max-rows)
+                   ": aggregate the table first, or give #:max-rows."))
+      (fields-chart t mark used rows title)))
+
+(: (-> Table string (Vec (Tuple string string (Vec string))) int string (Result PlotError Chart)))
+(defun (fields-chart t mark used rows title)
+  (def found (vec-map (fun (c) (match c ((Tuple _ column _) (field-of t column)))) used))
+  (match (find (fun (r) (err? r)) found)
+    ((Some (Err e)) (Err e))
+    (_
+     (def fields (vec-map (fun (r) (match r ((Ok f) f) ((Err _) (panic! "unreachable")))) found))
+     (def wrong
+       (find (fun (i) (match (vec-ref used i)
+                        ((Tuple _ _ kinds) (none? (find (fun (k) (= k (record-ref (vec-ref fields i) kind))) kinds)))))
+             (range 0 (vec-length used))))
+     (match wrong
+       ((Some i)
+        (def (Tuple channel column kinds) (vec-ref used i))
+        (refuse (str "'" column "' is " (record-ref (vec-ref fields i) kind) ", and the " channel
+                     " of a " mark " chart is " (string-join kinds " or ") ".")))
+       (None
+        ;; One field for each column, even when two channels use it.
+        (def distinct (loop (:for f fields) (:acc seen (folding [] (if (some? (find (fun (g) (= (record-ref g name) (record-ref f name))) seen)) seen (vec-add seen f))))))
+        (Ok (Chart (body [(Tuple "data" (data-of distinct rows))
+                          (Tuple "mark" (JsonStr mark))
+                          (Tuple "encoding" (object {vecing (Tuple (match (vec-ref used i) ((Tuple channel _ _) channel))
+                                                                   (encoding (vec-ref fields i)))
+                                                            (:for i (range 0 (vec-length used)))}))])
+                   (title title) (width 400) (height 300))))))))
+
+(: (Vec string))
+(def numbers-or-times ["quantitative" "temporal"])
+(: (Vec string))
+(def any-kind ["quantitative" "temporal" "nominal"])
+
+;; A point for each row, at x and y, both numbers or times; `#:color` names
+;; a column that colours the points.
+(: (-> Table string string (#:color string) (#:title string) (#:max-rows int) (Result PlotError Chart)))
+(defun (scatter-plot t x y #:color "" #:title "" #:max-rows 5000)
+  (chart-of t "point" [(Tuple "x" x numbers-or-times) (Tuple "y" y numbers-or-times) (Tuple "color" color any-kind)]
+            max-rows title))
+
+;; A line through the rows in the order of x; with `#:color`, a line for
+;; each value of that column.
+(: (-> Table string string (#:color string) (#:title string) (#:max-rows int) (Result PlotError Chart)))
+(defun (line-plot t x y #:color "" #:title "" #:max-rows 5000)
+  (xy-chart t "line" x y color max-rows title))
+
+(: (-> Table string string string string int string (Result PlotError Chart)))
+(defun (xy-chart t mark x y color max-rows title)
+  (chart-of t mark [(Tuple "x" x any-kind) (Tuple "y" y ["quantitative"]) (Tuple "color" color any-kind)]
+            max-rows title))
+
+;; A bar for each row, of height y at x: of a table of one row for each bar,
+;; as groups->table or table-count makes it.
+(: (-> Table string string (#:color string) (#:title string) (#:max-rows int) (Result PlotError Chart)))
+(defun (bar-plot t x y #:color "" #:title "" #:max-rows 5000)
+  (xy-chart t "bar" x y color max-rows title))
+
+;; The counts of the values of a column of numbers in `#:bins` bins of one
+;; width, from the least value to the greatest, nulls and NaNs left out. The
+;; bins are counted here, so the chart holds them and not the rows.
+(: (-> Table string (#:bins int) (#:title string) (Result PlotError Chart)))
+(defun (histogram t x #:bins 30 #:title "")
+  (def (Ok f) (field-of t x) :propagate)
+  (if (not (= (record-ref f kind) "quantitative"))
+      (refuse (str "'" x "' is " (record-ref f kind) ", and a histogram is of numbers."))
+      (Ok (bins-chart x (numbers-of f) (max bins 1) title))))
+
+;; The numbers of the field, nulls left out.
+(: (-> Field (Vec double)))
+(defun (numbers-of f)
+  (loop (:for v (record-ref f values))
+        (:when-let (Some x) (match v ((JsonFloat d) (Some d)) ((JsonInt l) (Some (cast double l))) (_ None)))
+        (:acc (vecing x))))
+
+(: (-> string (Vec double) int string Chart))
+(defun (bins-chart x values bins title)
+  (def low (fold (fun (v m) (min v m)) (/ 1.0 0.0) values))
+  (def high (fold (fun (v m) (max v m)) (/ -1.0 0.0) values))
+  (def width (if (and (finite? low) (> high low)) (/ (- high low) (cast double bins)) 1.0))
+  (def start (if (finite? low) low 0.0))
+  (def counts
+    (loop (:for v values)
+          ;; The greatest value is in the last bin, not one after it.
+          (:let i (min (- bins 1) (cast int (floor (/ (- v start) width)))))
+          (:acc c (folding (vec-map (fun (_) 0L) (range-vec bins))
+                           (vec-set c i (+ (vec-ref c i) 1L))))))
+  (Chart (body [(Tuple "data"
+                       (object [(Tuple "values"
+                                       (array {vecing (object [(Tuple "start" (number (+ start (* (cast double i) width))))
+                                                               (Tuple "end" (number (+ start (* (cast double (+ i 1)) width))))
+                                                               (Tuple "count" (JsonInt (vec-ref counts i)))])
+                                                      (:for i (range 0 bins))}))]))
+                (Tuple "mark" (JsonStr "bar"))
+                (Tuple "encoding"
+                       (object [(Tuple "x" (object [(Tuple "field" (JsonStr "start")) (Tuple "type" (JsonStr "quantitative"))
+                                                    (Tuple "bin" (object [(Tuple "binned" (JsonBool #t))]))
+                                                    (Tuple "title" (JsonStr x))]))
+                                (Tuple "x2" (object [(Tuple "field" (JsonStr "end"))]))
+                                (Tuple "y" (object [(Tuple "field" (JsonStr "count")) (Tuple "type" (JsonStr "quantitative"))]))]))])
+         (title title) (width 400) (height 300)))
+
+(: (-> int (Vec int)))
+(defun (range-vec n) {vecing i (:for i (range 0 n))})
+
+;; ===========================================================================
+;; Layers, titles and sizes
+;; ===========================================================================
+
+;; The charts drawn on one another, in order, with the title and size of the
+;; first: points and the line of a model through them.
+(: (-> (Vec Chart) Chart))
+(defun (layer charts)
+  (def first (vec-ref charts 0))
+  (Chart (body [(Tuple "layer" (array (vec-map (fun (c) (object (record-ref c body))) charts)))])
+         (title (record-ref first title)) (width (record-ref first width)) (height (record-ref first height))))
+
+(: (-> Chart string Chart))
+(defun (chart-title c title)
+  (Chart (body (record-ref c body)) (title title) (width (record-ref c width)) (height (record-ref c height))))
+
+;; The size of the plot, in pixels.
+(: (-> Chart int int Chart))
+(defun (chart-size c width height)
+  (Chart (body (record-ref c body)) (title (record-ref c title)) (width width) (height height)))
+
+;; The Vega-Lite specification, as JSON text; `#:indent` spaces for each
+;; level, 0 for one line.
+(: (-> Chart (#:indent int) string))
+(defun (chart->json c #:indent 0)
+  (def top [(Tuple "$schema" (JsonStr "https://vega.github.io/schema/vega-lite/v5.json"))
+            (Tuple "width" (JsonInt (cast long (record-ref c width))))
+            (Tuple "height" (JsonInt (cast long (record-ref c height))))])
+  (def titled (if (= (record-ref c title) "") top (vec-add top (Tuple "title" (JsonStr (record-ref c title))))))
+  (json->string (object (vec-append-pairs titled (record-ref c body))) #:indent indent))

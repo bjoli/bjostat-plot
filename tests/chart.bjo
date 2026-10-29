@@ -1,0 +1,112 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+;; bjostat-plot/tests/chart.bjo — charts as Vega-Lite: the specification of
+;; each kind, the types of columns, the errors, and saving.
+;;
+;;     bjo run tests/chart.bjo
+;;
+;; Every line should start with "ok:".
+
+(import (std prelude))
+(import (std simpletest))
+(import (bjostat table))
+(import (bjostat csv))
+(import (bjostat plot chart))
+(import (bjostat plot save))
+
+(import/extern (temp-dir (: System.IO.Path.GetTempPath (-> string))))
+
+(: (-> (Result PlotError %a) %a))
+(defun (ok r)
+  (match r
+    ((Ok v) v)
+    ((Err e) (panic! (displayed e)))))
+
+(: (-> (Result PlotError %a) string))
+(defun (error-of r)
+  (match r
+    ((Ok _) "no error")
+    ((Err e) (displayed e))))
+
+(: (-> string Table))
+(defun (csv text)
+  (match (csv->table text)
+    ((Ok t) t)
+    ((Err e) (panic! (displayed e)))))
+
+(: (Table))
+(def cars (csv "speed,dist,make,seen\n4,2,a,2025-01-02\n7,4.5,b,2025-02-03\n10,,a,2025-03-04\n"))
+
+(defun (main)
+  (expect "a scatter plot"
+          (chart->json (ok (scatter-plot cars "speed" "dist" #:title "Stops")))
+          (str "{\"$schema\":\"https://vega.github.io/schema/vega-lite/v5.json\",\"width\":400,\"height\":300,"
+               "\"title\":\"Stops\","
+               "\"data\":{\"values\":[{\"speed\":4,\"dist\":2.0},{\"speed\":7,\"dist\":4.5},{\"speed\":10,\"dist\":null}]},"
+               "\"mark\":\"point\","
+               "\"encoding\":{\"x\":{\"field\":\"speed\",\"type\":\"quantitative\"},"
+               "\"y\":{\"field\":\"dist\",\"type\":\"quantitative\"}}}"))
+  (expect "a colour of strings is nominal"
+          (string-contains? (chart->json (ok (scatter-plot cars "speed" "dist" #:color "make")))
+                            "\"color\":{\"field\":\"make\",\"type\":\"nominal\"}")
+          #t)
+  (expect "dates are temporal, as ISO dates"
+          (let ((json (chart->json (ok (line-plot cars "seen" "dist")))))
+            (Tuple (string-contains? json "\"seen\":\"2025-01-02\"")
+                   (string-contains? json "\"x\":{\"field\":\"seen\",\"type\":\"temporal\"}")
+                   (string-contains? json "\"mark\":\"line\"")))
+          (Tuple #t #t #t))
+  (def by-size (match (table-categorize (csv "size,n\nsmall,3\nlarge,1\nmedium,2\n") "size"
+                                        #:levels ["small" "medium" "large"])
+                 ((Ok t) t) ((Err e) (panic! (displayed e)))))
+  (expect "a category is in the order of its levels"
+          (string-contains? (chart->json (ok (bar-plot by-size "size" "n")))
+                            "\"x\":{\"field\":\"size\",\"type\":\"nominal\",\"sort\":[\"small\",\"medium\",\"large\"]}")
+          #t)
+
+  ;; Histograms
+  (def values (csv "x\n0\n1\n1\n2\n9\n10\n"))
+  (def hist (chart->json (ok (histogram values "x" #:bins 2))))
+  (expect "a histogram: its bins, the greatest value in the last"
+          (string-contains? hist (str "\"values\":[{\"start\":0.0,\"end\":5.0,\"count\":4},"
+                                      "{\"start\":5.0,\"end\":10.0,\"count\":2}]"))
+          #t)
+  (expect "a histogram of strings" (error-of (histogram cars "make")) "'make' is nominal, and a histogram is of numbers.")
+
+  ;; Errors
+  (expect "a column that is not there"
+          (error-of (scatter-plot cars "speed" "weight"))
+          "the table has no column 'weight'. Its columns are: speed, dist, make, seen.")
+  (expect "strings on the x of a scatter plot"
+          (error-of (scatter-plot cars "make" "dist"))
+          "'make' is nominal, and the x of a point chart is quantitative or temporal.")
+  (expect "more rows than #:max-rows"
+          (error-of (scatter-plot cars "speed" "dist" #:max-rows 2))
+          "the chart would draw 3 rows, and #:max-rows is 2: aggregate the table first, or give #:max-rows.")
+
+  ;; Layers, titles, sizes
+  (def both (layer [(ok (scatter-plot cars "speed" "dist")) (ok (line-plot cars "speed" "dist"))]))
+  (def json (chart->json (chart-size (chart-title both "Two") 600 200)))
+  (expect "a layer of two charts, with a title and a size"
+          (Tuple (string-contains? json "\"layer\":[{\"data\"") (string-contains? json "\"title\":\"Two\"")
+                 (string-contains? json "\"width\":600,\"height\":200"))
+          (Tuple #t #t #t))
+
+  ;; Saving
+  (def path (str (temp-dir) "bjostat-plot-test.vl.json"))
+  (expect "saved as JSON" (save-chart both path) (Ok unit))
+  (expect "the file is the specification" (file-read-text path) (chart->json both))
+  (expect "an extension that is not one"
+          (error-of (save-chart both "chart.gif"))
+          "chart.gif: a chart is saved as .json, .svg, .png or .pdf, and this ends in '.gif'.")
+  ;; Of an image: a file where vl-convert is installed, and an Err that says
+  ;; how to install it where it is not.
+  (def svg (str (temp-dir) "bjostat-plot-test.svg"))
+  (expect "saved as SVG, or told what to install"
+          (match (save-chart both svg)
+            ((Ok _) (string-starts-with? (file-read-text svg) "<svg"))
+            ((Err e) (string-contains? (displayed e) "cargo install vl-convert")))
+          #t)
+  0)
