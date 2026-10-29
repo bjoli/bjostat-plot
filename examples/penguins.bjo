@@ -73,8 +73,7 @@
   (println "")
 
   ;; Heavy penguins have long flippers: R's cor.test(flipper_length_mm, body_mass_g).
-  (match (loop (:for f* flipper) (:for m* mass)
-               (:when-let (Some f) f*) (:when-let (Some m) m*)
+  (match (loop (:for (Tuple f m) (complete-rows (Tuple flipper mass)))
                (:acc (correlation-test (Tuple (cast double f) (cast double m)))))
     ((Ok r) (println (str "The correlation of flipper length and body mass is "
                           (three-decimals (record-ref r estimate)) ", p "
@@ -83,8 +82,7 @@
   (println "")
 
   ;; Are males heavier? R's t.test(body_mass_g ~ sex).
-  (match (loop (:for s* sex) (:for m* mass)
-               (:when-let (Some s) s*) (:when-let (Some m) m*)
+  (match (loop (:for (Tuple s m) (complete-rows (Tuple sex mass)))
                (:acc (welch-t-test 0.0 (Tuple (= s "female") (cast double m)))))
     ((Ok r) (println (t-test->string r)))
     ((Err e) (println (displayed e))))
@@ -95,8 +93,7 @@
   (def (Ok levels) (category-levels t "species") :propagate)
   (def (Ok codes) (category-codes t "species") :propagate)
   (def categories [(Tuple "species" levels)])
-  (match (loop (:for c* codes) (:for f* flipper) (:for m* mass)
-               (:when-let (Some c) c*) (:when-let (Some f) f*) (:when-let (Some m) m*)
+  (match (loop (:for (Tuple c f m) (complete-rows (Tuple codes flipper mass)))
                (:acc (with-categories linear-model ["flipper_length_mm"] categories
                                       (Tuple (cast double m) [(cast double f)] [c]))))
     ((Ok m)
@@ -110,12 +107,10 @@
   ;; one; of each species, it is a deeper one. One model of all the rows,
   ;; and one of each species, by `grouping`; `summarizing` gives each
   ;; species' shortest and longest bill, the ends of its line.
-  (def all (ok-model (loop (:for b* bill) (:for d* depth)
-                     (:when-let (Some b) b*) (:when-let (Some d) d*)
+  (def all (ok-model (loop (:for (Tuple b d) (complete-rows (Tuple bill depth)))
                      (:acc (simple-linear-model "bill_length_mm" (Tuple d b))))))
   (def by-species
-    (loop (:for s* species) (:for b* bill) (:for d* depth)
-          (:when-let (Some s) s*) (:when-let (Some b) b*) (:when-let (Some d) d*)
+    (loop (:for (Tuple s b d) (complete-rows (Tuple species bill depth)))
           (:acc (grouping (pairing (simple-linear-model "bill_length_mm") summarizing)
                           (Tuple s (Tuple (Tuple d b) b))))))
   (: (-> string LinearModel string))

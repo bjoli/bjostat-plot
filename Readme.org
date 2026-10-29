@@ -104,7 +104,14 @@ the columns of text are categories, as R's factors:
 | Bill length and depth | ~lm~ of all, and of each species | ~simple-linear-model~, by ~grouping~ |
 
 Each test and model leaves out the rows with a null in its columns, as R's
-~na.omit~ does. The model of body mass:
+~na.omit~ does, by ~complete-rows~:
+
+#+BEGIN_SRC scheme
+(loop (:for (Tuple f m) (complete-rows (Tuple flipper mass)))
+      (:acc (correlation-test (Tuple (cast double f) (cast double m)))))
+#+END_SRC
+
+The model of body mass:
 
 #+BEGIN_SRC text
 Coefficients:
