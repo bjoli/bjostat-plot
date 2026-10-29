@@ -16,6 +16,16 @@ through them, as ~examples/cars.bjo~ draws it:
 
 [[file:docs/cars-model.png]]
 
+To use it, depend on it in the manifest of a project; it brings bjostat
+with it:
+
+#+BEGIN_SRC scheme
+(depends
+  (package (name (bjostat plot))
+           (version (version-at-least "0.1.0"))
+           (source (git (url "https://github.com/bjoli/bjostat-plot")))))
+#+END_SRC
+
 ** Charts: (bjostat plot chart)
 
 | Function | What it draws |
@@ -59,7 +69,7 @@ says so, and the specification still is written.
 ~save-chart~ waits for vl-convert, so a bjoroutine that calls it parks its
 thread, as the compiler warns.
 
-** An example
+** An example: R's cars
 
 ~examples/cars.bjo~ draws R's ~cars~: the points with the line of a linear
 model of ~(bjostat models)~ through them, a histogram of the distances, and
@@ -71,8 +81,8 @@ bjo run examples/cars.bjo /tmp
 
 | [[file:docs/cars-histogram.png]] | [[file:docs/cars-bands.png]] |
 
-The images in ~docs/~ are of the specifications it writes, drawn by
-vl-convert 1.9.0 at twice their size.
+The images in ~docs/~ are of the specifications the examples write, drawn
+by vl-convert 1.9.0 at twice their size.
 
 ** An example: the Palmer penguins
 
@@ -152,8 +162,8 @@ charts by facets; ~(bjostat plot)~ does not draw these yet.
 bjo run tests/chart.bjo    # every line starts with "ok:"
 #+END_SRC
 
-The specifications of the example were drawn by vl-convert 1.9.0, as SVG
-and as PNG, and look as they should.
+The specifications of the examples were drawn by vl-convert 1.9.0 as PNG,
+and look as they should.
 
 ** License
 

@@ -12,7 +12,9 @@
 ;; type of each column comes from its type: a number is quantitative, a
 ;; string or a bool nominal, a category nominal in the order of its levels,
 ;; and a date or a time temporal. A column that a chart cannot use, as a
-;; string on the x of a scatter plot, is an Err when the chart is made.
+;; string on the x of a scatter plot, is an Err when the chart is made. The
+;; scale of a number on a scatter or line chart fits its values and does not
+;; start at 0, as R draws them; bars start at 0.
 ;;
 ;; The rows of the columns a chart uses go into the specification. A chart
 ;; of more rows than `#:max-rows`, 5000 by default, is an Err: Vega-Lite
