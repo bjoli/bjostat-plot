@@ -4,10 +4,12 @@
   (description "Charts of bjostat's tables as Vega-Lite: scatter, line and bar charts and histograms, saved as JSON, SVG, PNG or PDF.")
   (license "MPL-2.0")
 
-  ;; The tables are bjostat's. A path while both are worked on; a git source
-  ;; with (version-at-least "0.1.0") once this is published.
+  ;; The tables are bjostat's. To work on both at once, give it a path
+  ;; source instead: (source (path (dir "../bjostat"))).
   (depends
-    (package (name (bjostat)) (source (path (dir "../bjostat")))))
+    (package (name (bjostat))
+             (version (version-at-least "0.1.0"))
+             (source (git (url "https://github.com/bjoli/bjostat")))))
 
   ;; A library: there is no src/main.bjo.
   )
