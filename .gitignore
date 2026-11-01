@@ -1,6 +1,12 @@
 .bjo/
 publish/
 scratch/
+
+# The charts an example writes into the directory it is given, the current one
+# by default: two files a chart is saved as. docs/ keeps the ones the Readme
+# shows.
+/*.vl.json
+/*.svg
 *.dll
 *.exe
 *.pdb
