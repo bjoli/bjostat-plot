@@ -27,12 +27,6 @@
 (import (bjostat plot chart))
 (import (bjostat plot save))
 
-(: (-> (Result TableError %a) %a))
-(defun (ok r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
-
-(: (-> (Result ModelError %a) %a))
-(defun (ok-model r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
-
 (: (-> double string))
 (defun (three-decimals x) (double->string (/ (round (* x 1000.0)) 1000.0)))
 
@@ -56,7 +50,7 @@
   (println (str (int->string (table-row-count t)) " penguins:"))
   (println (table->string t #:rows 3))
   (println "")
-  (println (table->string (ok (table-select (table-summary t) ["column" "type" "count" "nulls" "min" "mean" "max"]))
+  (println (table->string (or-panic (table-select (table-summary t) ["column" "type" "count" "nulls" "min" "mean" "max"]))
                           #:digits 1))
   (println "")
   (columns t (species string) (sex string)
@@ -99,7 +93,7 @@
     ((Ok m)
      (println (model->string m))
      (println "")
-     (println (table->string (ok-model (model-anova m (anova-terms ["flipper_length_mm"] categories))) #:digits 2)))
+     (println (table->string (or-panic (model-anova m (anova-terms ["flipper_length_mm"] categories))) #:digits 2)))
     ((Err e) (println (displayed e))))
   (println "")
 
@@ -107,7 +101,7 @@
   ;; one; of each species, it is a deeper one. One model of all the rows,
   ;; and one of each species, by `grouping`; `summarizing` gives each
   ;; species' shortest and longest bill, the ends of its line.
-  (def all (ok-model (loop (:for (Tuple b d) (complete-rows (Tuple bill depth)))
+  (def all (or-panic (loop (:for (Tuple b d) (complete-rows (Tuple bill depth)))
                      (:acc (simple-linear-model "bill_length_mm" (Tuple d b))))))
   (def by-species
     (loop (:for (Tuple s b d) (complete-rows (Tuple species bill depth)))
@@ -133,8 +127,8 @@
   ;; The line of all the penguins, as a fourth "species", so that the chart
   ;; gives it a colour of its own. It is the last level, so that the species
   ;; keep the colours of the other charts.
-  (def lines (ok (table-categorize
-                  (ok (make-table [(named "bill_length_mm" (doubles-column (vec-add (vec-add xs 32.1) 59.6)))
+  (def lines (or-panic (table-categorize
+                  (or-panic (make-table [(named "bill_length_mm" (doubles-column (vec-add (vec-add xs 32.1) 59.6)))
                               (named "bill_depth_mm" (doubles-column (vec-add (vec-add ys (model-predict all [32.1]))
                                                                               (model-predict all [59.6]))))
                               (named-strings "species" (array->string-column (vec->array (vec-add (vec-add names "All") "All"))))]))
@@ -143,7 +137,7 @@
 
   ;; The charts.
   (def (Ok species-counts) (table-count t ["species"]) :propagate)
-  (loop (:for (Tuple name c) (ok-plot (charts t species-counts lines)))
+  (loop (:for (Tuple name c) (or-panic (charts t species-counts lines)))
         (:do (save dir name c)))
   (Ok unit))
 
@@ -179,9 +173,6 @@
     ((Tuple (Ok m) (Some s)) (Tuple m s))
     ((Tuple (Err e) _) (panic! (displayed e)))
     (_ (panic! "a species with no bill lengths"))))
-
-(: (-> (Result PlotError %a) %a))
-(defun (ok-plot r) (match r ((Ok v) v) ((Err e) (panic! (displayed e)))))
 
 (defun (main args)
   (def path (if (> (vec-length args) 0) (vec-ref args 0) "examples/data/penguins.csv"))
