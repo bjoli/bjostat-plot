@@ -4,12 +4,20 @@ The package ~(bjostat plot)~ makes charts of the tables of [[https://github.com/
 [[https://vega.github.io/vega-lite/][Vega-Lite]] specifications, and saves them as JSON, or as SVG, PNG or PDF.
 
 #+BEGIN_SRC scheme
+(import (bjostat table))
 (import (bjostat plot chart))
 (import (bjostat plot save))
 
-(def (Ok c) (scatter-plot cars "speed" "dist" #:title "Stopping distance") :propagate)
-(save-chart c "cars.svg")
+(def c (or-panic (scatter-plot cars "speed" "dist" #:title "Stopping distance")))
+(or-panic (save-chart c "cars.svg"))
 #+END_SRC
+
+Every chart answers a ~(Result PlotError ...)~, and ~save-chart~ a
+~(Result PlotError Unit)~: ~or-panic~ is what a script unwraps them with,
+and it takes any Result whose error it can display — a chart's, a table's, a
+model's. A function that means to handle a failure rather than stop returns
+the ~Result~ and passes it on with ~:propagate~. ~cars~ here is the table
+~examples/cars.bjo~ builds.
 
 R's ~cars~, the points and the line of a linear model of ~(bjostat models)~
 through them, as ~examples/cars.bjo~ draws it:
@@ -41,9 +49,12 @@ with it:
 Each also takes ~#:title~, and the charts of rows ~#:max-rows~.
 
 *Types.* A chart takes the names of columns, and the Vega-Lite type of each
-comes from its type in the table: a number is quantitative, a string or a
-bool nominal, a category nominal in the order of its levels, and a date or a
-time temporal. A column a chart cannot use, as strings on the x of a
+comes from its type in the table: a number is quantitative — a double, a
+float, a long, an int, or one of the narrow and unsigned widths bjostat's
+columns hold — a string or a bool nominal, a category nominal in the order of
+its levels, and a date or a time temporal. A ulong is a JSON number rather
+than a JSON integer, since one reaches past what a reader of the chart holds
+exactly. A column a chart cannot use, as strings on the x of a
 scatter plot, is an ~Err~ when the chart is made, as is a column the table
 does not have.
 
@@ -100,8 +111,11 @@ R writes a missing value as ~NA~, so the file is read with ~#:nulls~, and
 the columns of text are categories, as R's factors:
 
 #+BEGIN_SRC scheme
-(read-csv path #:nulls ["NA"]
-               #:types [(Tuple "species" Category) (Tuple "island" Category) (Tuple "sex" Category)])
+(def penguins
+  (or-panic (read-csv path #:nulls ["NA"]
+                             #:types [(Tuple "species" Category)
+                                      (Tuple "island" Category)
+                                      (Tuple "sex" Category)])))
 #+END_SRC
 
 | Step | R | bjostat |
