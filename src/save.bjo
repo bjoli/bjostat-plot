@@ -36,7 +36,7 @@
 ;; and an image of it for one ending in .svg, .png or .pdf.
 (: (-> Chart string (Result PlotError Unit)))
 (defun (save-chart c path)
-  (def extension (string-downcase (option-value (path-file-extension path) "")))
+  (def extension (string-downcase (option-ref-or (path-file-extension path) "")))
   (cond
     ((= extension ".json") (write-text path (chart->json c)))
     ((= (converter extension) "")

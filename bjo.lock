@@ -1,5 +1,5 @@
 (lock
   (locked
-    (package (name (bjostat)) (version "0.1.5")
+    (package (name (bjostat)) (version "0.1.7")
              (source (git (url "https://github.com/bjoli/bjostat")))
-             (commit "aae469519a30c37f0b484903fa094a70bd2d113a"))))
+             (commit "54f0f4153ecff8c46ae161dd6bf040ef8ecc26e2"))))
