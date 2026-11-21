@@ -1,6 +1,6 @@
 (package
   (name (bjostat plot))
-  (version "0.1.0")
+  (version "0.1.1")
   (description "Charts of bjostat's tables as Vega-Lite: scatter, line and bar charts and histograms, saved as JSON, SVG, PNG or PDF.")
   (license "MPL-2.0")
 
