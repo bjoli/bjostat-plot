@@ -47,7 +47,7 @@
 (defun (write-text path text)
   (match (file-write-text path text)
     ((Ok _) (Ok unit))
-    ((Err e) (refuse (str path ": " (.-Message e))))))
+    ((Err e) (refuse (str path ": " (.-Message (as-exception e)))))))
 
 ;; The specification to a file beside the image, then vl-convert from that
 ;; to the image; the specification is deleted after.
