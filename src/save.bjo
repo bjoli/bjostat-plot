@@ -61,6 +61,6 @@
     ((Ok 0) (Ok unit))
     ((Ok code) (refuse (str "vl-convert " command " stopped with the code " (int->string code) " for " path ".")))
     ((Err e)
-     (refuse (str "vl-convert, which draws a chart as an image, did not run: " (.-Message e)
+     (refuse (str "vl-convert, which draws a chart as an image, did not run: " (run-error-message e)
                   ". Install it with `cargo install vl-convert --locked` and have it on the PATH,"
                   " or save the chart as .json.")))))
