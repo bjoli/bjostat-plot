@@ -45,7 +45,7 @@
 
 (: (-> string string (Result PlotError Unit)))
 (defun (write-text path text)
-  (match (try (file-write-text path text) #:catch (System.Exception))
+  (match (file-write-text path text)
     ((Ok _) (Ok unit))
     ((Err e) (refuse (str path ": " (.-Message e))))))
 
@@ -56,7 +56,7 @@
   (def spec (str path ".vl.json"))
   (def (Ok _) (write-text spec (chart->json c)) :propagate)
   (def result (run/status '(,(cmd "vl-convert" command "--input" spec "--output" path))))
-  (ignore (try (file-delete spec) #:catch (System.Exception)))
+  (ignore (file-delete spec))
   (match result
     ((Ok 0) (Ok unit))
     ((Ok code) (refuse (str "vl-convert " command " stopped with the code " (int->string code) " for " path ".")))

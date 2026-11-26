@@ -100,7 +100,7 @@
   ;; Saving
   (def path (str (temp-dir) "bjostat-plot-test.vl.json"))
   (expect "saved as JSON" (save-chart both path) (Ok unit))
-  (expect "the file is the specification" (file-read-text path) (chart->json both))
+  (expect "the file is the specification" (raise-err (file-read-text path)) (chart->json both))
   (expect "an extension that is not one"
           (error-of (save-chart both "chart.gif"))
           "chart.gif: a chart is saved as .json, .svg, .png or .pdf, and this ends in '.gif'.")
@@ -109,7 +109,7 @@
   (def svg (str (temp-dir) "bjostat-plot-test.svg"))
   (expect "saved as SVG, or told what to install"
           (match (save-chart both svg)
-            ((Ok _) (string-starts-with? (file-read-text svg) "<svg"))
+            ((Ok _) (string-starts-with? (raise-err (file-read-text svg)) "<svg"))
             ((Err e) (string-contains? (displayed e) "cargo install vl-convert")))
           #t)
   0)
